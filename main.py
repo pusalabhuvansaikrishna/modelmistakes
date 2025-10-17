@@ -188,6 +188,9 @@ def find_errors(data):
 def excel_new(data):
     timestamp=datetime.now().strftime("%Y%m%d_%H%M%S")
     file_name=f'Result_{timestamp}'
+    reports_folder=os.path.join(os.getcwd(),"Reports")
+    if not os.path.exists(reports_folder):
+        os.makedirs(reports_folder)
     with pd.ExcelWriter(f"{os.getcwd()}\Reports\{file_name}.xlsx", engine="openpyxl") as writer:
         for page_no, page_data in data.items():
             dfs=[]
