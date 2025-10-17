@@ -1,0 +1,7 @@
+bs4
+requests
+streamlit
+openpyxl
+nltk
+xlsxwriter
+langdetect
