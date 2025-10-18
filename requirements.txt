@@ -5,3 +5,5 @@ openpyxl
 nltk
 xlsxwriter
 langdetect
+redis
+redis[Hiredis]

@@ -10,6 +10,10 @@ from evaluation.normalize import Normalize
 from datetime import datetime
 from langdetect import detect
 from language_dict import language_map
+import redis
+import json
+
+r=redis.Redis(host="localhost",port=6379,decode_responses=True)
 
 def detect_language(text):
     code=detect(text)
@@ -51,13 +55,24 @@ def process_file_parallel(df,max_workers=4):
     urls=df['URL'].unique()
     processed_data={}
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures=[executor.submit(process_url,url) for url in urls]
+        futures={}
+        for url in urls:
+            if r.exists(url):
+                stored_data=r.get(url)
+                stored_dict=json.loads(stored_data)
+                page_no=stored_dict['page_no']
+                page_dict=stored_dict['page_dict']
+                processed_data[page_no]=page_dict
+            else:
+                futures[executor.submit(process_url,url)]=url
 
         for future in as_completed(futures):
+            url=futures[future]
             page_no,page_dict=future.result()
             processed_data[page_no]=page_dict
+            to_store={"page_no":page_no,"page_dict":page_dict}
+            r.set(url, json.dumps(to_store))
     return processed_data
-    #excel(processed_data)
 
 def clean(inp: str) -> str:
     """Clean text: reduce whitespaces, normalize line breaks."""
