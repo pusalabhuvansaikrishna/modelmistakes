@@ -183,7 +183,7 @@ def identify_langage(text):
     prediction=model.predict(text)
     return prediction.language
 def find_errors(data):
-    error_data={}
+    error_data={"Page ID":[], "Model Name":[], "Ground Truth":[], "OCR Text":[], "Edit Distance":[]}
     pages=data.keys()
     for page in pages:
         groundtruth=data[page]['ground_truth']
@@ -192,11 +192,13 @@ def find_errors(data):
                 continue
             else:
                 lang=detect_language(groundtruth)
-                gt_list,pred_list,ed_list=process_erors(find_word_differences(groundtruth,data[page][model],lang))
-                heading=process_heading(model)
-                if page not in error_data:
-                    error_data[page]={}
-                error_data[page][f'groundtruth and {heading}']={f"Ground Truth ({heading})":gt_list,heading:pred_list, "Edit Distance":ed_list}
+                for i in find_word_differences(groundtruth,data[page][model],lang) or []:
+                    error_data['Page ID'].append(page)
+                    error_data['Model Name'].append(process_heading(model))
+                    error_data['Ground Truth'].append(i['GroundTruth'])
+                    error_data['OCR Text'].append(i['Predicted'])
+                    error_data['Edit Distance'].append(i['EditDistance'])
+
     return error_data
 
 
@@ -206,14 +208,11 @@ def excel_new(data):
     reports_folder=os.path.join(os.getcwd(),"Reports")
     if not os.path.exists(reports_folder):
         os.makedirs(reports_folder)
-    with pd.ExcelWriter(f"{os.getcwd()}\Reports\{file_name}.xlsx", engine="openpyxl") as writer:
-        for page_no, page_data in data.items():
-            dfs=[]
-            for gp_key, gp_values in page_data.items():
-                df=pd.DataFrame(gp_values)
-                dfs.append(df)
-            merged_df=pd.concat(dfs,axis=1)
-            merged_df.to_excel(writer,sheet_name=f'{page_no}',index=True)
+    df=pd.DataFrame(data)
+    file_path = os.path.join(os.getcwd(), "Reports", f"{file_name}.xlsx")
+    with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+        df.to_excel(writer,sheet_name="Error Data", index=True)
+
     return file_name
 
 st.set_page_config(page_title="Find What Went Wrong by Models",page_icon='🤔',layout="wide",initial_sidebar_state=None,menu_items=None)
@@ -243,7 +242,7 @@ if uploaded_file:
 
         col1,col2,col3=st.columns(3)
         with col2:
-            file_path=f"{os.getcwd()}\Reports\{name}.xlsx"
+            file_path = os.path.join(os.getcwd(), "Reports", f"{name}.xlsx")
             with open(file_path,"rb") as f:
                 file_bytes=f.read()
             st.download_button("Download",file_bytes,file_name=f'{name}.xlsx',on_click="ignore",type="primary", icon=':material/download:',width='content')
