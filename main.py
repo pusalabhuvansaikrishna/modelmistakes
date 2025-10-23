@@ -12,8 +12,10 @@ from langdetect import detect
 from language_dict import language_map
 import redis
 import json
+import utils
 
 r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
+#r=redis.Redis(host="localhost",port=6379,decode_responses=True)
 
 def detect_language(text):
     code=detect(text)
@@ -47,10 +49,6 @@ def get_data(url:str):
     else:
         return "Url is not in proper format, Make sure it is in http(s)://example.com/..."
 
-def process_url(url):
-    page_no, gt, headings, paragraphs=get_data(url)
-    return page_no,{"ground_truth":gt,**dict(zip(headings, paragraphs))}
-
 def process_file_parallel(df,max_workers=4):
     urls=df['URL'].unique()
     processed_data={}
@@ -64,7 +62,7 @@ def process_file_parallel(df,max_workers=4):
                 page_dict=stored_dict['page_dict']
                 processed_data[page_no]=page_dict
             else:
-                futures[executor.submit(process_url,url)]=url
+                futures[executor.submit(utils.process_url,url)]=url
 
         for future in as_completed(futures):
             url=futures[future]
