@@ -13,7 +13,7 @@ from language_dict import language_map
 import redis
 import json
 
-r=redis.Redis(host="localhost",port=6379,decode_responses=True)
+r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
 
 def detect_language(text):
     code=detect(text)
