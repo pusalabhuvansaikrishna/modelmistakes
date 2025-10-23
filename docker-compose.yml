@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis_cache
+    command: ["redis-server", "--save", "", "--appendonly", "no"]  # adjust persistence options
+    # If you want password protect Redis, uncomment below env and command:
+    # environment:
+    #   - REDIS_PASSWORD=${REDIS_PASSWORD}
+    # command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  streamlit:
+    build: .
+    container_name: streamlit_app
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # - REDIS_PASSWORD=${REDIS_PASSWORD}  # uncomment if using password
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+    volumes:
+      - ./:/app   # optional: mounts local code for quick iteration (dev); remove in prod
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  redis_data:
