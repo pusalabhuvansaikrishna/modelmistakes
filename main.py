@@ -206,10 +206,14 @@ def excel_new(data):
     reports_folder=os.path.join(os.getcwd(),"Reports")
     if not os.path.exists(reports_folder):
         os.makedirs(reports_folder)
-    df=pd.DataFrame(data)
     file_path = os.path.join(os.getcwd(), "Reports", f"{file_name}.xlsx")
+    try:
+        df=pd.DataFrame(data)
+    except:
+        df=pd.DataFrame()
+
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
-        if not df.empty:
+        if (df is not None) and (not df.empty):
             df.to_excel(writer,sheet_name="Error Data", index=True)
         else:
             pd.DataFrame({"Message":["No Data Available"]}).to_excel(writer, sheet_name="Empty data", index=False)
