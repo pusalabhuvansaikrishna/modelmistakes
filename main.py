@@ -14,8 +14,8 @@ import redis
 import json
 import utils
 
-r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
-#r=redis.Redis(host="localhost",port=6379,decode_responses=True)
+#r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
+r=redis.Redis(host="localhost",port=6379,decode_responses=True)
 
 def detect_language(text):
     code=detect(text)
@@ -209,14 +209,16 @@ def excel_new(data):
     df=pd.DataFrame(data)
     file_path = os.path.join(os.getcwd(), "Reports", f"{file_name}.xlsx")
     with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
-        df.to_excel(writer,sheet_name="Error Data", index=True)
-
+        if not df.empty:
+            df.to_excel(writer,sheet_name="Error Data", index=True)
+        else:
+            pd.DataFrame({"Message":["No Data Available"]).to_excel(writer, sheet_name="Empty data", index=False)
     return file_name
 
 st.set_page_config(page_title="Find What Went Wrong by Models",page_icon='🤔',layout="wide",initial_sidebar_state=None,menu_items=None)
 st.title("🤔 Find What Went Wrong by the Models!")
 st.info("""This tool automates OCR validation by cross-checking OCR model outputs with ground-truth text collected from the Testing Portal.""", icon="ℹ️",width="stretch")
-uploaded_file=st.file_uploader("Upload the Test Report CSV",type="csv",accept_multiple_files=False,label_visibility="visible",help="Currently Accepting Only CSV Files")
+uploaded_file=st.file_uploader("Upload the Test Report CSV",type="csv",accept_multiple_files=False,label_visibility="visible",help="Currently Accepting Only CSV Files",key="main")
 if uploaded_file:
     original_df=pd.read_csv(uploaded_file)
     with st.status("Processing the report...",expanded=True,state='running') as status:
