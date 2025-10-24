@@ -212,7 +212,7 @@ def excel_new(data):
         if not df.empty:
             df.to_excel(writer,sheet_name="Error Data", index=True)
         else:
-            pd.DataFrame({"Message":["No Data Available"]).to_excel(writer, sheet_name="Empty data", index=False)
+            pd.DataFrame({"Message":["No Data Available"]}).to_excel(writer, sheet_name="Empty data", index=False)
     return file_name
 
 st.set_page_config(page_title="Find What Went Wrong by Models",page_icon='🤔',layout="wide",initial_sidebar_state=None,menu_items=None)
