@@ -219,6 +219,8 @@ def find_errors_serial(data):
                     print(f"[SKIPPED] {page} {model}: {e}")
 
     return error_data
+
+#The above Serial and Below Parallel Code does the same but serial method is followed, as logic used for the mistakes detection is not supporting the parallel processing.
 def find_errors_parallel(data, max_workers=1):
     error_data = {
         "Page ID": [], "Model Name": [],
@@ -248,27 +250,6 @@ def find_errors_parallel(data, max_workers=1):
 
     return error_data
 
-'''
-def find_errors(data):
-    error_data={"Page ID":[], "Model Name":[], "Ground Truth":[], "OCR Text":[], "Edit Distance":[]}
-    pages=data.keys()
-    for page in pages:
-        print(page)
-        groundtruth=data[page]['ground_truth']
-        for model,text in data[page].items():
-            if model=="ground_truth":
-                pass
-            else:
-                lang=detect_language(groundtruth)
-                for i in find_word_differences(groundtruth,data[page][model],lang) or []:
-                    error_data['Page ID'].append(page)
-                    error_data['Model Name'].append(process_heading(model))
-                    error_data['Ground Truth'].append(i['GroundTruth'])
-                    error_data['OCR Text'].append(i['Predicted'])
-                    error_data['Edit Distance'].append(i['EditDistance'])
-
-    return error_data
-'''
 
 def excel_new(data):
     timestamp=datetime.now().strftime("%Y%m%d_%H%M%S")
