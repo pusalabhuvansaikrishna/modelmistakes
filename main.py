@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import time
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, ThreadPoolExecutor, TimeoutError
 from nltk.metrics import edit_distance
 from evaluation.normalize import Normalize
 from datetime import datetime
@@ -13,6 +13,7 @@ from language_dict import language_map
 import redis
 import json
 import utils
+import uuid
 
 #r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
 r=redis.Redis(host="localhost",port=6379,decode_responses=True)
@@ -180,14 +181,83 @@ def process_erors(errors):
 def identify_langage(text):
     prediction=model.predict(text)
     return prediction.language
+
+def process_model(page, model, groundtruth, text):
+    lang = detect_language(groundtruth)
+    diffs = find_word_differences(groundtruth, text, lang)
+    rows = []
+    for i in diffs:
+        rows.append({
+            "Page ID": page,
+            "Model Name": process_heading(model),
+            "Ground Truth": i['GroundTruth'],
+            "OCR Text": i['Predicted'],
+            "Edit Distance": i['EditDistance']
+        })
+    return rows
+def find_errors_serial(data):
+    error_data = {
+        "Page ID": [], "Model Name": [],
+        "Ground Truth": [], "OCR Text": [], "Edit Distance": []
+    }
+
+    for page, models in data.items():
+        print(f"[PAGE] {page}")
+        groundtruth = models.get("ground_truth")
+
+        for model, text in models.items():
+            if model != "ground_truth":
+                try:
+                    rows = process_model(page, model, groundtruth, text)
+                    for row in rows:
+                        error_data["Page ID"].append(row["Page ID"])
+                        error_data["Model Name"].append(row["Model Name"])
+                        error_data["Ground Truth"].append(row["Ground Truth"])
+                        error_data["OCR Text"].append(row["OCR Text"])
+                        error_data["Edit Distance"].append(row["Edit Distance"])
+                except Exception as e:
+                    print(f"[SKIPPED] {page} {model}: {e}")
+
+    return error_data
+def find_errors_parallel(data, max_workers=1):
+    error_data = {
+        "Page ID": [], "Model Name": [],
+        "Ground Truth": [], "OCR Text": [], "Edit Distance": []
+    }
+
+    tasks = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for page, models in data.items():
+            print(page)
+
+            groundtruth = models.get('ground_truth')
+            for model, text in models.items():
+                if model != 'ground_truth':
+                    tasks.append(executor.submit(process_model, page, model, groundtruth, text))
+
+        for future in as_completed(tasks):
+            try:
+                for row in future.result():
+                    error_data["Page ID"].append(row["Page ID"])
+                    error_data["Model Name"].append(row["Model Name"])
+                    error_data["Ground Truth"].append(row["Ground Truth"])
+                    error_data["OCR Text"].append(row["OCR Text"])
+                    error_data["Edit Distance"].append(row["Edit Distance"])
+            except Exception as e:
+                print(f"[SKIPPED] Task failed: {e}")
+
+    return error_data
+
+'''
 def find_errors(data):
     error_data={"Page ID":[], "Model Name":[], "Ground Truth":[], "OCR Text":[], "Edit Distance":[]}
     pages=data.keys()
     for page in pages:
+        print(page)
         groundtruth=data[page]['ground_truth']
         for model,text in data[page].items():
             if model=="ground_truth":
-                continue
+                pass
             else:
                 lang=detect_language(groundtruth)
                 for i in find_word_differences(groundtruth,data[page][model],lang) or []:
@@ -198,7 +268,7 @@ def find_errors(data):
                     error_data['Edit Distance'].append(i['EditDistance'])
 
     return error_data
-
+'''
 
 def excel_new(data):
     timestamp=datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -206,23 +276,15 @@ def excel_new(data):
     reports_folder=os.path.join(os.getcwd(),"Reports")
     if not os.path.exists(reports_folder):
         os.makedirs(reports_folder)
-    file_path = os.path.join(os.getcwd(), "Reports", f"{file_name}.xlsx")
-    try:
-        df=pd.DataFrame(data)
-    except:
-        df=pd.DataFrame()
-
-    with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
-        if (df is not None) and (not df.empty):
-            df.to_excel(writer,sheet_name="Error Data", index=True)
-        else:
-            pd.DataFrame({"Message":["No Data Available"]}).to_excel(writer, sheet_name="Empty data", index=False)
+    file_path = os.path.join(os.getcwd(), "Reports", f"{file_name}.csv")
+    df=pd.DataFrame(data)
+    df.to_csv(file_path,index=False,encoding='utf-8-sig')
     return file_name
 
 st.set_page_config(page_title="Find What Went Wrong by Models",page_icon='🤔',layout="wide",initial_sidebar_state=None,menu_items=None)
 st.title("🤔 Find What Went Wrong by the Models!")
 st.info("""This tool automates OCR validation by cross-checking OCR model outputs with ground-truth text collected from the Testing Portal.""", icon="ℹ️",width="stretch")
-uploaded_file=st.file_uploader("Upload the Test Report CSV",type="csv",accept_multiple_files=False,label_visibility="visible",help="Currently Accepting Only CSV Files",key="main")
+uploaded_file=st.file_uploader("Upload the Test Report CSV",type="csv",accept_multiple_files=False,label_visibility="visible",help="Currently Accepting Only CSV Files",key="master")
 if uploaded_file:
     original_df=pd.read_csv(uploaded_file)
     with st.status("Processing the report...",expanded=True,state='running') as status:
@@ -235,7 +297,7 @@ if uploaded_file:
         #Finding the error in the errors in the text
         st.write("Finding the errors...")
         start=time.time()
-        error_data=find_errors(dict_data)
+        error_data=find_errors_serial(dict_data)
         st.badge(str(time.time()-start), icon=":material/timer:", color="blue")
 
         st.write("Preparing Excel to Download!")
@@ -246,8 +308,8 @@ if uploaded_file:
 
         col1,col2,col3=st.columns(3)
         with col2:
-            file_path = os.path.join(os.getcwd(), "Reports", f"{name}.xlsx")
+            file_path = os.path.join(os.getcwd(), "Reports", f"{name}.csv")
             with open(file_path,"rb") as f:
                 file_bytes=f.read()
-            st.download_button("Download",file_bytes,file_name=f'{name}.xlsx',on_click="ignore",type="primary", icon=':material/download:',width='content')
+            st.download_button("Download",file_bytes,file_name=f'{name}.csv',on_click="ignore",type="primary", icon=':material/download:',width='content')
 
