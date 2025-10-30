@@ -14,6 +14,7 @@ import redis
 import json
 import utils
 import uuid
+import re
 
 #r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
 r=redis.Redis(host="localhost",port=6379,decode_responses=True)
@@ -21,6 +22,29 @@ r=redis.Redis(host="localhost",port=6379,decode_responses=True)
 def detect_language(text):
     code=detect(text)
     return language_map.get(code.lower())
+
+def process_data(marked_data):
+    marked_data = re.sub(r'<mark[^>]*>del</mark>', '', marked_data)
+    cleaned = re.sub(r'</?mark[^>]*>', '', marked_data)
+    paragraph = ' '.join(cleaned.split())
+    return paragraph
+def get_data_api(url):
+    headings=[]
+    paragraphs=[]
+    response=requests.get(url)
+    if response.status_code==200:
+        data=response.json()
+        page_id=data['id']
+        gt=data['gt']
+        for i in data['ocr_list']:
+            model_name=i['layout_model']+"/"+i['ocr_model']
+            paragraph=process_data(i['text'])
+            headings.append(model_name)
+            paragraphs.append(paragraph)
+        return page_id, gt, headings, paragraphs
+    else:
+        print("Failed to fetch Data")
+
 
 def get_data(url:str):
     headings=[]
@@ -56,6 +80,7 @@ def process_file_parallel(df,max_workers=4):
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures={}
         for url in urls:
+            url=url+"/api/"
             if r.exists(url):
                 stored_data=r.get(url)
                 stored_dict=json.loads(stored_data)
@@ -189,7 +214,7 @@ def process_model(page, model, groundtruth, text):
     for i in diffs:
         rows.append({
             "Page ID": page,
-            "Model Name": process_heading(model),
+            "Model Name":model,
             "Ground Truth": i['GroundTruth'],
             "OCR Text": i['Predicted'],
             "Edit Distance": i['EditDistance']
