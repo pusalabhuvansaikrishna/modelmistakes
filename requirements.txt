@@ -7,3 +7,4 @@ xlsxwriter
 langdetect
 redis
 redis[Hiredis]
+re
