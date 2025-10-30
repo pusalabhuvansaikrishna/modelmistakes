@@ -28,6 +28,7 @@ def process_data(marked_data):
     cleaned = re.sub(r'</?mark[^>]*>', '', marked_data)
     paragraph = ' '.join(cleaned.split())
     return paragraph
+
 def get_data_api(url):
     headings=[]
     paragraphs=[]
