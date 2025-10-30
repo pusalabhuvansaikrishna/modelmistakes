@@ -1,3 +1,5 @@
+import re
+import requests
 def process_data(marked_data):
     marked_data = re.sub(r'<mark[^>]*>del</mark>', '', marked_data)
     cleaned = re.sub(r'</?mark[^>]*>', '', marked_data)
