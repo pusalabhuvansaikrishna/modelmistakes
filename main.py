@@ -16,6 +16,9 @@ import utils
 import uuid
 import re
 from api_helper import get_data_api
+from jiwer import wer
+from jiwer.process import process_words
+from jiwer.transformations import wer_default
 
 r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
 #r=redis.Redis(host="localhost",port=6379,decode_responses=True)
@@ -133,7 +136,22 @@ def merge_splits(gt_words, pred_words):
         i += 1
     return merged_pred
 
-def find_word_differences(gt_text: str, pred_text: str, language: str):
+
+def find_word_differences(gt: str, pred: str) -> list[dict]:
+    a = process_words(gt, pred, wer_default, wer_default)
+    ret = []
+    for i in a.alignments[0]:
+        if i.type == 'substitute':
+            gt_word = a.references[0][i.ref_start_idx:i.ref_end_idx]
+            pred_word = a.hypotheses[0][i.hyp_start_idx:i.hyp_end_idx]
+            ret.append({
+                'GroundTruth': gt_word,
+                'Predicted': pred_word,
+                'EditDistance': edit_distance(gt_word, pred_word)
+            })
+    return ret
+
+def find_word_differencess(gt_text: str, pred_text: str, language: str):
     """Compare GT and predicted text word by word and return mismatches with edit distance."""
     # Clean and normalize
     gt_text = clean(gt_text)
@@ -187,7 +205,7 @@ def identify_langage(text):
 
 def process_model(page, model, groundtruth, text):
     lang = detect_language(groundtruth)
-    diffs = find_word_differences(groundtruth, text, lang)
+    diffs = find_word_differences(groundtruth, text)
     rows = []
     for i in diffs:
         rows.append({
