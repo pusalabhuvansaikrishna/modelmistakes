@@ -20,8 +20,16 @@ from jiwer import wer
 from jiwer.process import process_words
 from jiwer.transformations import wer_default
 
-r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
-#r=redis.Redis(host="localhost",port=6379,decode_responses=True)
+#r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
+r=redis.Redis(host="localhost",port=6379,decode_responses=True)
+
+
+def is_redis_available(r):
+    try:
+        r.ping()
+        return True
+    except:
+        return False
 
 def detect_language(text):
     code=detect(text)
@@ -56,27 +64,49 @@ def get_data(url:str):
         return "Url is not in proper format, Make sure it is in http(s)://example.com/..."
 
 def process_file_parallel(df,max_workers=4):
+    url_to_pageid = (
+        df.drop_duplicates(subset=['URL'])
+        .set_index('URL')['PageID']
+        .to_dict()
+    )
+
     urls=df['URL'].unique()
     processed_data={}
+    redis_live=is_redis_available(r)
+
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures={}
         for url in urls:
-            url=url+"/api/"
-            if r.exists(url):
-                stored_data=r.get(url)
-                stored_dict=json.loads(stored_data)
-                page_no=stored_dict['page_no']
-                page_dict=stored_dict['page_dict']
-                processed_data[page_no]=page_dict
+            api_url=url+"/api/"
+            df_pageid=url_to_pageid[url]
+
+            if not redis_live:
+                futures[executor.submit(utils.process_url, api_url)] = (url, df_pageid)
+                continue
+
+            if r.exists(api_url):
+                try:
+                    stored_data = json.loads(r.get(api_url))
+                    page_dict = stored_data["page_dict"]
+                    processed_data[df_pageid]=page_dict
+                    continue
+                except Exception:
+                    futures[executor.submit(utils.process_url, url)] = (url, df_pageid)
+
             else:
-                futures[executor.submit(utils.process_url,url)]=url
+                futures[executor.submit(utils.process_url, api_url)] = (url, df_pageid)
 
         for future in as_completed(futures):
-            url=futures[future]
-            page_no,page_dict=future.result()
-            processed_data[page_no]=page_dict
-            to_store={"page_no":page_no,"page_dict":page_dict}
-            r.set(url, json.dumps(to_store))
+            url, df_pageid = futures[future]
+
+            api_page_no, page_dict = future.result()
+
+            # We IGNORE api_page_no — use dataset PageID
+            processed_data[df_pageid] = page_dict
+
+            # Store to Redis (if enabled)
+            if redis_live:
+                r.set(url + "/api/", json.dumps({"page_dict": page_dict}))
     return processed_data
 
 def clean(inp: str) -> str:
@@ -144,12 +174,39 @@ def find_word_differences(gt: str, pred: str) -> list[dict]:
         if i.type == 'substitute':
             gt_word = a.references[0][i.ref_start_idx:i.ref_end_idx]
             pred_word = a.hypotheses[0][i.hyp_start_idx:i.hyp_end_idx]
+            if len(gt_word) == len(pred_word):
+                for j, k in zip(gt_word, pred_word):
+                    ret.append({
+                        'GroundTruth': j,
+                        'Predicted': k,
+                        'EditDistance': edit_distance(j, k)
+                    })
+            else:
+                ret.append({
+                    'GroundTruth': ' '.join(gt_word),
+                    'Predicted': ' '.join(pred_word),
+                    'EditDistance': edit_distance(' '.join(gt_word), ' '.join(pred_word))
+                })
+            # ret.append({
+            #     'GroundTruth': gt_word,
+            #     'Predicted': pred_word,
+            #     'EditDistance': edit_distance(gt_word, pred_word)
+            # })
+    return ret
+    '''        
+    a = process_words(gt, pred, wer_default, wer_default)
+    ret = []
+    for i in a.alignments[0]:
+        if i.type == 'substitute':
+            gt_word = a.references[0][i.ref_start_idx:i.ref_end_idx]
+            pred_word = a.hypotheses[0][i.hyp_start_idx:i.hyp_end_idx]
             ret.append({
                 'GroundTruth': gt_word,
                 'Predicted': pred_word,
                 'EditDistance': edit_distance(gt_word, pred_word)
             })
     return ret
+    '''
 
 def find_word_differencess(gt_text: str, pred_text: str, language: str):
     """Compare GT and predicted text word by word and return mismatches with edit distance."""
@@ -288,30 +345,34 @@ st.title("🤔 Find What Went Wrong by the Models!")
 st.info("""This tool automates OCR validation by cross-checking OCR model outputs with ground-truth text collected from the Testing Portal.""", icon="ℹ️",width="stretch")
 uploaded_file=st.file_uploader("Upload the Test Report CSV",type="csv",accept_multiple_files=False,label_visibility="visible",help="Currently Accepting Only CSV Files",key="master")
 if uploaded_file:
-    original_df=pd.read_csv(uploaded_file)
-    with st.status("Processing the report...",expanded=True,state='running') as status:
-        #Extract the Information from webpages to dict.
-        st.write("Extracting the information...")
-        start=time.time()
-        dict_data=process_file_parallel(original_df)
-        st.badge(str(time.time()-start),icon=":material/timer:", color="blue")
+    df=pd.read_csv(uploaded_file)
+    original_df=df[df['Layout Model']=="GT"]
+    if original_df.empty:
+        st.warning("There are no GT Layout Models in the CSV, This is Layout Model: GT Specific Application")
+    else:
+        with st.status("Processing the report...",expanded=True,state='running') as status:
+            #Extract the Information from webpages to dict.
+            st.write("Extracting the information...")
+            start=time.time()
+            dict_data=process_file_parallel(original_df)
+            st.badge(str(time.time()-start),icon=":material/timer:", color="blue")
 
-        #Finding the error in the errors in the text
-        st.write("Finding the errors...")
-        start=time.time()
-        error_data=find_errors_serial(dict_data)
-        st.badge(str(time.time()-start), icon=":material/timer:", color="blue")
+            #Finding the error in the errors in the text
+            st.write("Finding the errors...")
+            start=time.time()
+            error_data=find_errors_serial(dict_data)
+            st.badge(str(time.time()-start), icon=":material/timer:", color="blue")
 
-        st.write("Preparing Excel to Download!")
-        start=time.time()
-        name=excel_new(error_data)
-        st.badge(str(time.time()-start),icon=":material/timer:", color="blue")
-        status.update(label="Ready to Download the Report!",state="complete",expanded=True)
+            st.write("Preparing Excel to Download!")
+            start=time.time()
+            name=excel_new(error_data)
+            st.badge(str(time.time()-start),icon=":material/timer:", color="blue")
+            status.update(label="Ready to Download the Report!",state="complete",expanded=True)
 
-        col1,col2,col3=st.columns(3)
-        with col2:
-            file_path = os.path.join(os.getcwd(), "Reports", f"{name}.csv")
-            with open(file_path,"rb") as f:
-                file_bytes=f.read()
-            st.download_button("Download",file_bytes,file_name=f'{name}.csv',on_click="ignore",type="primary", icon=':material/download:',width='content')
+            col1,col2,col3=st.columns(3)
+            with col2:
+                file_path = os.path.join(os.getcwd(), "Reports", f"{name}.csv")
+                with open(file_path,"rb") as f:
+                    file_bytes=f.read()
+                st.download_button("Download",file_bytes,file_name=f'{name}.csv',on_click="ignore",type="primary", icon=':material/download:',width='content')
 
