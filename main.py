@@ -20,8 +20,8 @@ from jiwer import wer
 from jiwer.process import process_words
 from jiwer.transformations import wer_default
 
-#r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
-r=redis.Redis(host="localhost",port=6379,decode_responses=True)
+r=redis.Redis(host=os.getenv("REDIS_HOST","redis"),port=6379,decode_responses=True)
+#r=redis.Redis(host="localhost",port=6379,decode_responses=True)
 
 
 def is_redis_available(r):
